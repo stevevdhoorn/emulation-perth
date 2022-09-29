@@ -1,0 +1,151 @@
+---
+title: "README.Rmd"
+author: "Stephen Vander Hoorn"
+date: '2022-09-28'
+output: html_document
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Emulation of a chemical transport model to assess air quality under impacts of future emission scenarios on air quality for the southwest of Western Australia
+
+<a rel="license" href="http://creativecommons.org/licenses/by/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International License</a>.
+
+### Overview and scope of analysis presented here
+
+Analyses are presented to illustrate the use of emulation applied to scenario analysis for future air quality. The R code presented here refers to the article titled 'Emulation of a chemical transport model to assess air quality under impacts of future emission scenarios on air quality for the southwest of Western Australia'. As the title indicates, this work was based on a case study set in southwest of Western Australia and which aims to show the utility of emulation applied to a specific policy question. The topic focusing on future air quality under hypothetical low emission scenarios, e.g. switching fossil fuel on-road diesel vehicles to electric vehicles. Emulation provides a flexible way of exploring multiple scenarios for a given policy question. 
+
+Selected analyses are presented here as follows:
+
+* Fitting an example emulator for a given a set of training data (CTM outputs)
+* Carrying out an area level scenario analysis given a set of emulators
+
+
+```{r setup, message = FALSE, echo=FALSE, warning=FALSE}
+### load relevant R libraries
+library(DiceKriging)
+library(sensitivity)
+library(ggplot2)
+library(cowplot)
+library(rlang)
+library(ggtext)
+library(grid)
+library(paletteer)
+library(hrbrthemes)
+library(dplyr)
+
+# Load additional R functions
+source('./EmodFit.R')
+source('./misc functions.R')
+```
+
+### Loading training data and fitting an emulator
+
+The following code chunk shows how an emulator can be fitted to training data generated from a CTM. The resulting outputs include:
+
+* model diagnostics
+* graphical summary of the model validation 
+* sensitivity analysis
+
+Each of these three analyses can be further examined as needed by the analyst. The example validation plot shows the mean prediction from the emulator model (with 95% Confidence bounds) compared to the CTM model. This result is for all GMR Perth unweighted by population. Results for sub-areas within the study area are not shown here, however, a similar process is applied to generate SA3 and SA4 (refer to main article) emulators.
+
+The "mean function" of the underlying Gaussian process is defined through the "formula" argument of the km function. Alternative options can be given to the kriging model to specify the mean function (see the R help files). The covariance structure of the Gaussian Process determines how data at one location in the parameter space informs another location in the parameter space. This is often defined such that the correlation between any two data points decreased as the distance between points increases. Thus, often the 'squared exponential' covariance structure as applied here with covtype='gaus' is a useful place to start.
+
+Variance-based Sensitivity Analysis is useful here to assess parameter variance contributions to the overall CTM output variance (i.e. $\Delta$PM2.5). We use the variance-based sensitivity analysis function "fast99()" in the R package "sensitivity" to carry out these analyses.
+
+Selected outputs from this analysis are as follows:
+
+
+```{r emulator, message = FALSE, echo=FALSE}
+data(res_gccunwgt)
+### Fit emulator for GMR Perth
+pm25_t = EmodFit(myvar  = 'pm25d', res = res_gccunwgt, myloc = 'Greater Perth', areaType = 'GCC_NAME16', molconv = 1)
+pm25_t$p # present validation data (Figure 4)  
+assoc(pm25_t$EmModel, mylaby = 'Delta PM2.5 (ugm-3)') # present associations (Figure 5)
+myVC(pm25_t$EmModel) # Carry out sensitivity analyses and present main effects and interactions
+```
+
+### Scenario analysis
+
+The following code shows how scenario analysis can be carried out using emulation. Several hypothetical scenarios are defined based on changes to the Perth on-road vehicle fleet in combination with a transition to renewable energy for electricity generation. A business-as-usual (BAU) is defined as the expected increase in emissions from the electricity grid for the study area (referred to as the SWIS) to meet the increased demand in electricity assuming the same energy mix as reported in base year (2012). Scenarios labeled as '* - renewables' are presented to assess the combined impact on PM2.5 from a transition to electric vehicles as well as 100% renewables. 
+
+The example scenarios are summarised in the next table below based on setting parameters in the emulators to levels corresponding to each scenario'. In practice, any combination of emission parameters for this application can be applied to study other scenarios of interest.
+
+```{r scenarios, message = FALSE, echo=FALSE}
+# Define scenarios based on setting parameters in the emulator at selected levels
+scendat = data.frame(myscen = paste("EV", seq(6), sep=""),
+                     descr = c("Diesel - BAU",
+                               "Diesel - renewables",
+                               "Petrol - BAU",
+                               "Petrol - renewables",
+                               "All vehicles - BAU",
+                               "All vehicles - renewables"),
+                     X1 = c(0.379, 0.379, 0.64, 0.64, 0, 0),
+                     X2 = c(0.94, 0.94, 0.10, 0.10, 0, 0),
+                     X3 = c(0.08, 0.08, 0.94, 0.94, 0, 0),
+                     X4 = c(0.95, 0.95, 0.08, 0.08, 0, 0) ,
+                     X5 = c(0.513, 0.513, 0.517, 0.517, 0, 0),
+                     X6 = c(0.94, 0.94, 0.13, 0.13, 0, 0),
+                     X7 = c(1.07, 0, 1.2, 0, 1.3, 0),
+                     X8 = c(1.07, 0, 1.2, 0, 1.3, 0))
+
+print(scendat)
+
+### load SA4 and SA3 emulators
+data(sa4_ems)
+data(sa3_ems)
+
+myvar = 'pm25d_wgt'
+regs = c('Perth - Inner', 'Perth - North East', 'Perth - North West',
+         'Perth - South East', 'Perth - South West', 'Mandurah')
+area_ems = sa4_ems
+tab = EmPred(areatype = 'sa4', scendat=scendat, regs=regs, myvar=myvar)
+tab$pop = c(170, 251, 535, 488, 403, 97)
+taba = rbind(tab, data.frame(regs = "Greater Perth",
+                             EV1 = sum(tab$EV1*tab$pop)/sum(tab$pop),
+                             EV2 = sum(tab$EV2*tab$pop)/sum(tab$pop),
+                             EV3 = sum(tab$EV3*tab$pop)/sum(tab$pop),
+                             EV4 = sum(tab$EV4*tab$pop)/sum(tab$pop),
+                             EV5 = sum(tab$EV5*tab$pop)/sum(tab$pop),
+                             EV6 = sum(tab$EV6*tab$pop)/sum(tab$pop),
+                             pop = sum(tab$pop)))
+
+regs = c('Bunbury', 'Manjimup', 'Augusta - Margaret River - Busselton')
+area_ems = sa3_ems
+tab = EmPred(areatype = 'sa3', scendat=scendat, regs=regs, myvar=myvar)
+tab$pop = c(102, 23, 51)
+tabb = rbind(tab, data.frame(regs = "SA total", 
+                             EV1 = sum(tab$EV1*tab$pop)/sum(tab$pop),
+                             EV2 = sum(tab$EV2*tab$pop)/sum(tab$pop),
+                             EV3 = sum(tab$EV3*tab$pop)/sum(tab$pop),
+                             EV4 = sum(tab$EV4*tab$pop)/sum(tab$pop),
+                             EV5 = sum(tab$EV5*tab$pop)/sum(tab$pop),
+                             EV6 = sum(tab$EV6*tab$pop)/sum(tab$pop),
+                             pop = sum(tab$pop)))
+
+tab4 = rbind(taba, tabb)
+```
+
+After running the emulators against each scenario, the following table is produced:
+
+```{r tab4, message = FALSE, echo=FALSE}
+tab4 %>% mutate_at(vars(paste0('EV', seq(6))), list(~ round(., 2)))
+```
+
+The net difference between scenario EV5 and EV6 is calculated as the difference in PM2.5 between BAU and 100% renewables:
+
+```{r netdiff, message = FALSE, echo=FALSE}
+# net difference for renewables - Greater Perth
+-0.45174514--0.56122372
+# 0.1094786
+# net difference for renewables - Surrounding regions
+0.02518582--0.12990284
+# 0.1550887
+```
+
+```{r, message = FALSE, echo=FALSE}
+#write.xlsx(tab4, file = './output/tab4.xlsx') # output file to separate excel table
+```
+
