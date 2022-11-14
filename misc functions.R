@@ -108,7 +108,7 @@ EmPred = function(areatype = 'sa3', scendat=scendat, regs=regs, myvar=myvar){
   results = data.frame(regs = regs)
   
   for (k in 1:nrow(scendat)){
-    thisscen = scendat[k, paste('X', seq(8), sep="")]  
+    thisscen = scendat[k, mypars]  
     regres = NULL
     #browser()
     for (i in 1:length(regs)){
